@@ -18,8 +18,8 @@ This project demonstrates a production-ready event-based application using the *
 │  │                 OpenTelemetry Instrumentation              │ │
 │  └───────────────────────────────────────────────────────────┘ │
 │  ┌────────────────┐              ┌─────────────────────────┐  │
-│  │ Business Logic │──────────────│  Outbox Processor       │  │
-│  │ (Orders API)   │              │  (Background Worker)    │  │
+│  │ Business Logic │──────────────│  Outbox Worker          │  │
+│  │ (Bookings API) │              │  (Background Process)   │  │
 │  └────────┬───────┘              └──────────┬──────────────┘  │
 └───────────┼─────────────────────────────────┼─────────────────┘
             │                                  │
@@ -27,10 +27,10 @@ This project demonstrates a production-ready event-based application using the *
 ┌───────────────────────────┐      ┌──────────────────────────┐
 │         MongoDB           │      │        Kafka Broker       │
 │  ┌────────────────────┐  │      │  ┌───────────────────┐   │
-│  │  Orders Collection │  │      │  │  business-events  │   │
+│  │Bookings Collection │  │      │  │  business-events  │   │
 │  └────────────────────┘  │      │  │     (topic)       │   │
 │  ┌────────────────────┐  │      │  └───────────────────┘   │
-│  │ Outbox Collection  │  │      └──────────────────────────┘
+│  │Event Outbox Table  │  │      └──────────────────────────┘
 │  │  (Event Queue)     │  │                  │
 │  └────────────────────┘  │                  │
 └───────────────────────────┘                  ▼
@@ -53,14 +53,14 @@ This project demonstrates a production-ready event-based application using the *
 The outbox pattern ensures reliable event publishing without distributed transactions:
 
 1. **Write Phase**: Business operation and event are written to MongoDB in a single transaction
-   - Order is inserted into `orders` collection
-   - Event is inserted into `outbox` collection
+   - Booking is inserted into `bookings` collection
+   - Event is inserted into `event_outbox` collection
    - Both operations succeed or fail together (atomicity)
 
-2. **Publish Phase**: Background processor polls the outbox table
-   - Retrieves pending events from `outbox` collection
+2. **Publish Phase**: Background worker polls the outbox table
+   - Retrieves awaiting events from `event_outbox` collection
    - Publishes events to Kafka
-   - Marks events as published on success
+   - Marks events as dispatched on success
    - Retries failed events
 
 3. **Benefits**:
@@ -83,28 +83,27 @@ The outbox pattern ensures reliable event publishing without distributed transac
 ### 3. Data Flow
 
 ```
-1. POST /api/orders
-   └─> Create Order in MongoDB
+1. POST /api/bookings
+   └─> Create Booking in MongoDB
        └─> Save Event to Outbox (same DB transaction)
            └─> Return Response (201 Created)
 
-2. Outbox Processor (Background)
-   └─> Poll Outbox for Pending Events
+2. Outbox Worker (Background)
+   └─> Poll Outbox for Awaiting Events
        └─> Publish to Kafka
-           └─> Mark as Published
+           └─> Mark as Dispatched
                └─> Event Available for Consumers
 ```
 
 ### 4. Event Types
 
-The application supports several business event types:
+The application supports several business event types (defined in `EventCategory` enum):
 
-- `order.created` - New order created
-- `order.updated` - Order information updated
-- `order.cancelled` - Order cancelled
-- `payment.processed` - Payment successfully processed
-- `payment.failed` - Payment failed
-- `shipment.created` - Shipment created
+- `booking.confirmed` - New booking created
+- `booking.cancelled` - Booking cancelled
+- `booking.completed` - Booking completed
+- `payment.success` - Payment successfully processed
+- `payment.declined` - Payment failed
 
 ## API Documentation
 
@@ -126,10 +125,10 @@ Event streaming is documented with AsyncAPI:
 ### Metrics (Prometheus)
 
 Custom application metrics:
-- `orders_created_total`: Counter for orders created
-- `orders_failed_total`: Counter for failed orders
-- `events_published_total`: Counter for published events by type
-- `request_duration_seconds`: Histogram for request latency
+- `booking_transactions_total`: Counter for bookings created
+- `booking_errors_total`: Counter for failed bookings
+- `domain_events_total`: Counter for dispatched events by category
+- `api_latency_seconds`: Histogram for request latency
 
 Access Prometheus: http://localhost:9090
 
@@ -163,43 +162,44 @@ Access Kafka UI: http://localhost:8080
 
 ## Database Schema
 
-### Orders Collection
+### Bookings Collection
 ```json
 {
-  "order_id": "ORD-12345678",
-  "customer_id": "CUST-001",
-  "items": [
+  "booking_ref": "BK-1234567890",
+  "client_identifier": "CLIENT-001",
+  "booking_items": [
     {
-      "product_id": "PROD-001",
-      "quantity": 2,
-      "price": 49.99
+      "item_identifier": "ITEM-001",
+      "item_quantity": 2,
+      "unit_cost": 75.50
     }
   ],
-  "total_amount": 99.98,
-  "status": "pending",
-  "created_at": "2024-01-01T10:00:00Z",
-  "updated_at": "2024-01-01T10:00:00Z"
+  "total_cost": 151.00,
+  "booking_status": "confirmed",
+  "notes": "Conference room",
+  "timestamp_created": "2024-01-01T10:00:00Z",
+  "timestamp_modified": "2024-01-01T10:00:00Z"
 }
 ```
 
-### Outbox Collection
+### Event Outbox Collection
 ```json
 {
-  "event_id": "EVT-A1B2C3D4",
-  "event_type": "order.created",
-  "aggregate_id": "ORD-12345678",
-  "payload": {
-    "order_id": "ORD-12345678",
-    "customer_id": "CUST-001",
-    "items": [...],
-    "total_amount": 99.98,
-    "status": "pending",
-    "created_at": "2024-01-01T10:00:00Z"
+  "event_ref": "EV-A1B2C3D4E5",
+  "category": "booking.confirmed",
+  "entity_id": "BK-1234567890",
+  "event_data": {
+    "booking_ref": "BK-1234567890",
+    "client_identifier": "CLIENT-001",
+    "booking_items": [...],
+    "total_cost": 151.00,
+    "notes": "Conference room",
+    "timestamp_created": "2024-01-01T10:00:00Z"
   },
-  "status": "pending",
-  "created_at": "2024-01-01T10:00:00Z",
-  "published_at": null,
-  "retry_count": 0
+  "current_state": "awaiting",
+  "timestamp_created": "2024-01-01T10:00:00Z",
+  "timestamp_dispatched": null,
+  "attempt_count": 0
 }
 ```
 

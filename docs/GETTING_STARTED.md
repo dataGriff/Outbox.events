@@ -243,7 +243,7 @@ Now that you have the basics working, you can:
 1. **Read the Architecture Documentation**: [docs/ARCHITECTURE.md](ARCHITECTURE.md)
 2. **Explore AsyncAPI Specification**: [docs/asyncapi.yaml](asyncapi.yaml)
 3. **Modify the Code**: The application uses hot-reload, so changes are reflected immediately
-4. **Add New Event Types**: Extend the `EventType` enum in `src/app/models.py`
+4. **Add New Event Types**: Extend the `EventCategory` enum in `src/app/models.py`
 5. **Build Event Consumers**: Create services that subscribe to Kafka topics
 
 ## Troubleshooting

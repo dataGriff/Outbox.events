@@ -137,12 +137,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      MONGODB_URI: mongodb://admin:password123@mongodb:27017/
-      MONGODB_DATABASE: outbox_db
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
-      OTEL_SERVICE_NAME: outbox-event-service
-      LOG_LEVEL: INFO
+      MONGO_CONNECTION_STRING: mongodb://admin:password123@mongodb:27017/
+      MONGO_DB_NAME: outbox_db
+      KAFKA_BROKERS: kafka:29092
+      OTLP_ENDPOINT: http://jaeger:4318
+      SERVICE_IDENTIFIER: outbox-event-service
+      LOGGING_LEVEL: INFO
     volumes:
       - ./src:/app/src
     networks:

@@ -4,6 +4,7 @@ Background worker for processing outbox events
 import asyncio
 import logging
 from typing import Optional
+from src.config.settings import get_configuration
 from src.app.database import repository_instance
 from src.app.kafka_service import broker_instance
 
@@ -13,8 +14,9 @@ log = logging.getLogger(__name__)
 class OutboxWorker:
     """Background worker for event dispatch"""
     
-    def __init__(self, interval_seconds: int = 5):
-        self._interval = interval_seconds
+    def __init__(self, interval_seconds: int = None):
+        config = get_configuration()
+        self._interval = interval_seconds or config.outbox_poll_seconds
         self._is_running = False
         self._worker_task: Optional[asyncio.Task] = None
     
