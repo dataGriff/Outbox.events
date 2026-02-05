@@ -52,10 +52,10 @@ curl http://localhost:8000/health
 Expected response:
 ```json
 {
-  "status": "healthy",
-  "mongodb": "healthy",
-  "kafka": "healthy",
-  "timestamp": "2024-01-01T10:00:00.000000"
+  "overall": "healthy",
+  "database_status": "operational",
+  "broker_status": "operational",
+  "checked_at": "2024-01-01T10:00:00.000000"
 }
 ```
 

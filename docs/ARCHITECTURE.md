@@ -231,8 +231,8 @@ The architecture supports horizontal scaling:
 ## Monitoring & Alerts
 
 Recommended alerts:
-- High failed order rate
-- Outbox event lag (pending events growing)
+- High failed booking rate
+- Outbox event lag (awaiting events growing)
 - Kafka publishing failures
 - High request latency (p95 > threshold)
 - Database connection issues

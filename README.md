@@ -152,8 +152,11 @@ Navigate to Kafka UI at http://localhost:8080 and browse the `business-events` t
 Access Prometheus at http://localhost:9090 and try queries:
 
 ```promql
-# Bookings created per second
+# Booking creation rate
 rate(booking_transactions_total[5m])
+
+# Failed bookings
+rate(booking_errors_total[5m])
 
 # 95th percentile request latency
 histogram_quantile(0.95, rate(api_latency_seconds_bucket[5m]))
@@ -249,15 +252,15 @@ Run the application locally for development:
 pip install -r requirements.txt
 
 # Set environment variables
-export MONGODB_URI="mongodb://admin:password123@localhost:27017/"
-export KAFKA_BOOTSTRAP_SERVERS="localhost:9092"
-export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
+export MONGO_CONNECTION_STRING="mongodb://admin:password123@localhost:27017/"
+export KAFKA_BROKERS="localhost:9092"
+export OTLP_ENDPOINT="http://localhost:4318"
 
 # Start external services
-docker-compose up -d mongodb kafka zookeeper
+docker compose up -d mongodb kafka zookeeper
 
 # Run application
-uvicorn src.app.main:app --reload
+uvicorn src.app.main:application --reload
 ```
 
 ### View Logs
