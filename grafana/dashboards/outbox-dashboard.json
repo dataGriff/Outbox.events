@@ -1,0 +1,77 @@
+{
+  "dashboard": {
+    "title": "Outbox Events Dashboard",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Bookings Created",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(booking_transactions_total[5m])",
+            "legendFormat": "Bookings/sec"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Failed Bookings",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(booking_errors_total[5m])",
+            "legendFormat": "Failures/sec"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Events Dispatched by Category",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(domain_events_total[5m])",
+            "legendFormat": "{{category}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "API Request Latency (95th percentile)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(api_latency_seconds_bucket[5m]))",
+            "legendFormat": "{{operation}} {{path}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 16
+        }
+      }
+    ],
+    "schemaVersion": 16,
+    "version": 1
+  }
+}

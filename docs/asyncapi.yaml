@@ -1,0 +1,158 @@
+asyncapi: 2.6.0
+info:
+  title: Outbox Events - Booking Events API
+  version: 1.0.0
+  description: |
+    AsyncAPI specification for booking events published to Kafka using the transactional outbox pattern.
+    
+    ## Event Flow
+    1. Booking operations are performed via REST API
+    2. Events are stored in MongoDB outbox table atomically with booking data
+    3. Background worker polls outbox and publishes events to Kafka
+    4. Consumers subscribe to event topics for downstream processing
+  
+  contact:
+    name: API Support
+    email: support@example.com
+
+servers:
+  development:
+    url: localhost:9092
+    protocol: kafka
+    description: Development Kafka broker
+
+channels:
+  business-events:
+    description: Channel for all booking-related business events
+    subscribe:
+      summary: Subscribe to booking events
+      operationId: subscribeBookingEvents
+      message:
+        oneOf:
+          - $ref: '#/components/messages/BookingConfirmed'
+          - $ref: '#/components/messages/BookingCancelled'
+          - $ref: '#/components/messages/PaymentSuccess'
+
+components:
+  messages:
+    BookingConfirmed:
+      name: BookingConfirmed
+      title: Booking Confirmed Event
+      summary: Published when a new booking is confirmed
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/BookingConfirmedPayload'
+
+    BookingCancelled:
+      name: BookingCancelled
+      title: Booking Cancelled Event
+      summary: Published when a booking is cancelled
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/BookingCancelledPayload'
+
+    PaymentSuccess:
+      name: PaymentSuccess
+      title: Payment Success Event
+      summary: Published when payment is successfully processed
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PaymentSuccessPayload'
+
+  schemas:
+    BookingConfirmedPayload:
+      type: object
+      properties:
+        event_reference:
+          type: string
+          description: Unique event reference
+          example: EV-A1B2C3D4E5
+        event_category:
+          type: string
+          enum: [booking.confirmed]
+          description: Event category
+        data:
+          type: object
+          properties:
+            booking_ref:
+              type: string
+              description: Booking reference
+              example: BK-1234567890
+            client_identifier:
+              type: string
+              description: Client identifier
+              example: CLIENT-001
+            booking_items:
+              type: array
+              items:
+                type: object
+                properties:
+                  item_identifier:
+                    type: string
+                  item_quantity:
+                    type: integer
+                  unit_cost:
+                    type: number
+            total_cost:
+              type: number
+              description: Total booking cost
+              example: 250.50
+            notes:
+              type: string
+            timestamp_created:
+              type: string
+              format: date-time
+        dispatched_at:
+          type: string
+          format: date-time
+          description: When event was dispatched
+
+    BookingCancelledPayload:
+      type: object
+      properties:
+        event_reference:
+          type: string
+          description: Unique event reference
+        event_category:
+          type: string
+          enum: [booking.cancelled]
+        data:
+          type: object
+          properties:
+            booking_ref:
+              type: string
+              description: Booking reference
+            client_identifier:
+              type: string
+              description: Client identifier
+            cancellation_timestamp:
+              type: string
+              format: date-time
+        dispatched_at:
+          type: string
+          format: date-time
+
+    PaymentSuccessPayload:
+      type: object
+      properties:
+        event_reference:
+          type: string
+          description: Unique event reference
+        event_category:
+          type: string
+          enum: [payment.success]
+        data:
+          type: object
+          properties:
+            payment_ref:
+              type: string
+            booking_ref:
+              type: string
+            amount:
+              type: number
+            processed_at:
+              type: string
+              format: date-time
+        dispatched_at:
+          type: string
+          format: date-time
