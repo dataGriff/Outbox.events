@@ -285,13 +285,14 @@ Configuration is done via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MONGODB_URI` | `mongodb://admin:password123@mongodb:27017/` | MongoDB connection string |
-| `MONGODB_DATABASE` | `outbox_db` | Database name |
-| `KAFKA_BOOTSTRAP_SERVERS` | `kafka:29092` | Kafka brokers |
-| `KAFKA_TOPIC` | `business-events` | Kafka topic name |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://jaeger:4318` | OpenTelemetry endpoint |
-| `OTEL_SERVICE_NAME` | `outbox-event-service` | Service name for tracing |
-| `LOG_LEVEL` | `INFO` | Logging level |
+| `MONGO_CONNECTION_STRING` | `mongodb://admin:password123@mongodb:27017/` | MongoDB connection string |
+| `MONGO_DB_NAME` | `outbox_db` | Database name |
+| `KAFKA_BROKERS` | `kafka:29092` | Kafka brokers |
+| `EVENT_TOPIC_NAME` | `business-events` | Kafka topic name |
+| `OTLP_ENDPOINT` | `http://jaeger:4318` | OpenTelemetry endpoint |
+| `SERVICE_IDENTIFIER` | `outbox-event-service` | Service name for tracing |
+| `LOGGING_LEVEL` | `INFO` | Logging level |
+| `OUTBOX_POLL_SECONDS` | `5` | Outbox polling interval |
 
 ## 🧹 Cleanup
 
