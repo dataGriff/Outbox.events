@@ -4,12 +4,12 @@
     "panels": [
       {
         "id": 1,
-        "title": "Orders Created",
+        "title": "Bookings Created",
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(orders_created_total[5m])",
-            "legendFormat": "Orders/sec"
+            "expr": "rate(booking_transactions_total[5m])",
+            "legendFormat": "Bookings/sec"
           }
         ],
         "gridPos": {
@@ -21,11 +21,11 @@
       },
       {
         "id": 2,
-        "title": "Failed Orders",
+        "title": "Failed Bookings",
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(orders_failed_total[5m])",
+            "expr": "rate(booking_errors_total[5m])",
             "legendFormat": "Failures/sec"
           }
         ],
@@ -38,12 +38,12 @@
       },
       {
         "id": 3,
-        "title": "Events Published by Type",
+        "title": "Events Dispatched by Category",
         "type": "graph",
         "targets": [
           {
-            "expr": "rate(events_published_total[5m])",
-            "legendFormat": "{{event_type}}"
+            "expr": "rate(domain_events_total[5m])",
+            "legendFormat": "{{category}}"
           }
         ],
         "gridPos": {
@@ -55,12 +55,12 @@
       },
       {
         "id": 4,
-        "title": "Request Duration (95th percentile)",
+        "title": "API Request Latency (95th percentile)",
         "type": "graph",
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, rate(request_duration_seconds_bucket[5m]))",
-            "legendFormat": "{{method}} {{endpoint}}"
+            "expr": "histogram_quantile(0.95, rate(api_latency_seconds_bucket[5m]))",
+            "legendFormat": "{{operation}} {{path}}"
           }
         ],
         "gridPos": {

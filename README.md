@@ -152,14 +152,14 @@ Navigate to Kafka UI at http://localhost:8080 and browse the `business-events` t
 Access Prometheus at http://localhost:9090 and try queries:
 
 ```promql
-# Orders created per second
-rate(orders_created_total[5m])
+# Bookings created per second
+rate(booking_transactions_total[5m])
 
-# 95th percentile request duration
-histogram_quantile(0.95, rate(request_duration_seconds_bucket[5m]))
+# 95th percentile request latency
+histogram_quantile(0.95, rate(api_latency_seconds_bucket[5m]))
 
-# Events published by type
-rate(events_published_total[5m])
+# Events dispatched by category
+rate(domain_events_total[5m])
 ```
 
 ## 🔍 How the Outbox Pattern Works
