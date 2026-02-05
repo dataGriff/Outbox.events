@@ -1,108 +1,112 @@
 """
-Kafka service for event publishing
+Kafka message broker integration
 """
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from confluent_kafka import Producer
 from confluent_kafka.admin import AdminClient, NewTopic
-from src.config.settings import settings
+from src.config.settings import get_configuration
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
-class KafkaService:
-    """Kafka service for publishing events"""
+class MessageBroker:
+    """Kafka producer wrapper"""
     
     def __init__(self):
-        self.producer: Optional[Producer] = None
-        self.config = {
-            'bootstrap.servers': settings.kafka_bootstrap_servers,
-            'client.id': 'outbox-event-publisher'
+        self._producer: Optional[Producer] = None
+        self._config = get_configuration()
+        self._broker_config = {
+            'bootstrap.servers': self._config.kafka_brokers,
+            'client.id': 'outbox-publisher',
+            'acks': 'all',
+            'retries': 3
         }
     
-    def connect(self):
+    def initialize(self):
         """Initialize Kafka producer"""
         try:
-            self.producer = Producer(self.config)
-            logger.info("Kafka producer initialized")
-            
-            # Create topic if it doesn't exist
-            self._create_topic_if_not_exists(settings.kafka_topic)
-        except Exception as e:
-            logger.error(f"Failed to initialize Kafka producer: {e}")
+            self._producer = Producer(self._broker_config)
+            log.info("Kafka producer initialized")
+            self._ensure_topic_exists()
+        except Exception as error:
+            log.error(f"Failed to initialize Kafka: {error}")
             raise
     
-    def _create_topic_if_not_exists(self, topic_name: str):
-        """Create Kafka topic if it doesn't exist"""
+    def _ensure_topic_exists(self):
+        """Create topic if not exists"""
         try:
-            admin_client = AdminClient({'bootstrap.servers': settings.kafka_bootstrap_servers})
+            admin = AdminClient({'bootstrap.servers': self._config.kafka_brokers})
+            existing_topics = admin.list_topics(timeout=10).topics
             
-            # Check if topic exists
-            metadata = admin_client.list_topics(timeout=10)
-            if topic_name not in metadata.topics:
-                topic = NewTopic(topic_name, num_partitions=3, replication_factor=1)
-                fs = admin_client.create_topics([topic])
+            if self._config.event_topic_name not in existing_topics:
+                new_topic = NewTopic(
+                    self._config.event_topic_name,
+                    num_partitions=3,
+                    replication_factor=1
+                )
+                futures = admin.create_topics([new_topic])
                 
-                # Wait for operation to complete
-                for topic, f in fs.items():
+                for topic_name, future in futures.items():
                     try:
-                        f.result()
-                        logger.info(f"Topic {topic} created successfully")
+                        future.result()
+                        log.info(f"Topic {topic_name} created")
                     except Exception as e:
-                        logger.warning(f"Failed to create topic {topic}: {e}")
+                        log.warning(f"Topic creation issue: {e}")
             else:
-                logger.info(f"Topic {topic_name} already exists")
-        except Exception as e:
-            logger.error(f"Error checking/creating topic: {e}")
+                log.info(f"Topic {self._config.event_topic_name} exists")
+        except Exception as error:
+            log.error(f"Topic check failed: {error}")
     
-    def disconnect(self):
-        """Disconnect Kafka producer"""
-        if self.producer:
-            self.producer.flush()
-            logger.info("Kafka producer disconnected")
+    def shutdown(self):
+        """Shutdown producer"""
+        if self._producer:
+            self._producer.flush(timeout=10)
+            log.info("Kafka producer shut down")
     
-    def health_check(self) -> bool:
-        """Check if Kafka is healthy"""
+    def verify_connectivity(self) -> bool:
+        """Check Kafka connectivity"""
         try:
-            admin_client = AdminClient({'bootstrap.servers': settings.kafka_bootstrap_servers})
-            metadata = admin_client.list_topics(timeout=5)
+            admin = AdminClient({'bootstrap.servers': self._config.kafka_brokers})
+            admin.list_topics(timeout=5)
             return True
-        except Exception as e:
-            logger.error(f"Kafka health check failed: {e}")
+        except Exception as error:
+            log.error(f"Kafka health check failed: {error}")
             return False
     
-    def publish_event(self, event_type: str, event_id: str, payload: Dict[str, Any]) -> bool:
-        """Publish an event to Kafka"""
+    def dispatch_message(self, event_category: str, event_ref: str, data: Dict[str, Any]) -> bool:
+        """Dispatch message to Kafka"""
         try:
-            message = {
-                "event_id": event_id,
-                "event_type": event_type,
-                "payload": payload,
-                "timestamp": payload.get("created_at", "")
+            message_payload = {
+                "event_reference": event_ref,
+                "event_category": event_category,
+                "data": data,
+                "dispatched_at": data.get("timestamp_created", "")
             }
             
-            self.producer.produce(
-                settings.kafka_topic,
-                key=event_id.encode('utf-8'),
-                value=json.dumps(message).encode('utf-8'),
-                callback=self._delivery_callback
+            self._producer.produce(
+                topic=self._config.event_topic_name,
+                key=event_ref.encode('utf-8'),
+                value=json.dumps(message_payload).encode('utf-8'),
+                on_delivery=self._handle_delivery
             )
             
-            self.producer.poll(0)
-            logger.info(f"Published event {event_id} to Kafka topic {settings.kafka_topic}")
+            self._producer.poll(0)
+            log.info(f"Message dispatched: {event_ref} to {self._config.event_topic_name}")
             return True
-        except Exception as e:
-            logger.error(f"Failed to publish event {event_id}: {e}")
+            
+        except Exception as error:
+            log.error(f"Failed to dispatch message {event_ref}: {error}")
             return False
     
-    def _delivery_callback(self, err, msg):
-        """Callback for message delivery confirmation"""
+    def _handle_delivery(self, err, msg):
+        """Callback for delivery confirmation"""
         if err:
-            logger.error(f"Message delivery failed: {err}")
+            log.error(f"Delivery error: {err}")
         else:
-            logger.debug(f"Message delivered to {msg.topic()} [{msg.partition()}]")
+            log.debug(f"Message delivered to {msg.topic()} partition {msg.partition()}")
 
 
-# Global Kafka service instance
-kafka_service = KafkaService()
+# Singleton instance
+broker_instance = MessageBroker()

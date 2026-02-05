@@ -1,78 +1,76 @@
 """
-Outbox processor service - polls outbox table and publishes events to Kafka
+Background worker for processing outbox events
 """
 import asyncio
 import logging
 from typing import Optional
-from src.app.database import db_service
-from src.app.kafka_service import kafka_service
+from src.app.database import repository_instance
+from src.app.kafka_service import broker_instance
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
-class OutboxProcessor:
-    """Service to process outbox events and publish to Kafka"""
+class OutboxWorker:
+    """Background worker for event dispatch"""
     
-    def __init__(self, poll_interval: int = 5):
-        self.poll_interval = poll_interval
-        self.running = False
-        self.task: Optional[asyncio.Task] = None
+    def __init__(self, interval_seconds: int = 5):
+        self._interval = interval_seconds
+        self._is_running = False
+        self._worker_task: Optional[asyncio.Task] = None
     
-    async def start(self):
-        """Start the outbox processor"""
-        self.running = True
-        self.task = asyncio.create_task(self._process_loop())
-        logger.info("Outbox processor started")
+    async def begin(self):
+        """Start the worker"""
+        self._is_running = True
+        self._worker_task = asyncio.create_task(self._execution_loop())
+        log.info(f"Outbox worker started (interval: {self._interval}s)")
     
-    async def stop(self):
-        """Stop the outbox processor"""
-        self.running = False
-        if self.task:
-            await self.task
-        logger.info("Outbox processor stopped")
+    async def halt(self):
+        """Stop the worker"""
+        self._is_running = False
+        if self._worker_task:
+            await self._worker_task
+        log.info("Outbox worker halted")
     
-    async def _process_loop(self):
-        """Main processing loop"""
-        while self.running:
+    async def _execution_loop(self):
+        """Main worker loop"""
+        while self._is_running:
             try:
-                await self._process_pending_events()
-            except Exception as e:
-                logger.error(f"Error processing outbox events: {e}")
+                await self._process_awaiting_events()
+            except Exception as error:
+                log.error(f"Worker execution error: {error}")
             
-            await asyncio.sleep(self.poll_interval)
+            await asyncio.sleep(self._interval)
     
-    async def _process_pending_events(self):
-        """Process pending events from outbox"""
-        events = await db_service.get_pending_events(limit=100)
+    async def _process_awaiting_events(self):
+        """Process events awaiting dispatch"""
+        pending_events = await repository_instance.retrieve_pending_events(batch_size=50)
         
-        if not events:
-            logger.debug("No pending events to process")
+        if not pending_events:
+            log.debug("No pending events")
             return
         
-        logger.info(f"Processing {len(events)} pending events")
+        log.info(f"Processing {len(pending_events)} events from outbox")
         
-        for event in events:
+        for event in pending_events:
             try:
-                # Publish to Kafka
-                success = kafka_service.publish_event(
-                    event_type=event.event_type.value,
-                    event_id=event.event_id,
-                    payload=event.payload
+                # Dispatch to Kafka
+                dispatch_successful = broker_instance.dispatch_message(
+                    event_category=event.category.value,
+                    event_ref=event.event_ref,
+                    data=event.event_data
                 )
                 
-                if success:
-                    # Mark as published in database
-                    await db_service.mark_event_published(event.event_id)
-                    logger.info(f"Successfully processed event {event.event_id}")
+                if dispatch_successful:
+                    await repository_instance.mark_as_dispatched(event.event_ref)
+                    log.info(f"Event {event.event_ref} processed successfully")
                 else:
-                    # Mark as failed
-                    await db_service.mark_event_failed(event.event_id)
-                    logger.error(f"Failed to process event {event.event_id}")
+                    await repository_instance.mark_as_error(event.event_ref)
+                    log.error(f"Event {event.event_ref} dispatch failed")
             
-            except Exception as e:
-                logger.error(f"Error processing event {event.event_id}: {e}")
-                await db_service.mark_event_failed(event.event_id)
+            except Exception as error:
+                log.error(f"Error processing event {event.event_ref}: {error}")
+                await repository_instance.mark_as_error(event.event_ref)
 
 
-# Global outbox processor instance
-outbox_processor = OutboxProcessor()
+# Singleton worker instance
+worker_instance = OutboxWorker()

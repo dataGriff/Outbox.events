@@ -1,15 +1,15 @@
 asyncapi: 2.6.0
 info:
-  title: Outbox Events - Business Events API
+  title: Outbox Events - Booking Events API
   version: 1.0.0
   description: |
-    AsyncAPI specification for business events published to Kafka using the outbox pattern.
+    AsyncAPI specification for booking events published to Kafka using the transactional outbox pattern.
     
     ## Event Flow
-    1. Business operations (orders, payments, etc.) are performed via REST API
-    2. Events are stored in MongoDB outbox table atomically with business data
-    3. Background processor publishes events to Kafka
-    4. Consumers can subscribe to event topics for event-driven processing
+    1. Booking operations are performed via REST API
+    2. Events are stored in MongoDB outbox table atomically with booking data
+    3. Background worker polls outbox and publishes events to Kafka
+    4. Consumers subscribe to event topics for downstream processing
   
   contact:
     name: API Support
@@ -23,137 +23,136 @@ servers:
 
 channels:
   business-events:
-    description: Channel for all business events
+    description: Channel for all booking-related business events
     subscribe:
-      summary: Subscribe to business events
-      operationId: subscribeBusinessEvents
+      summary: Subscribe to booking events
+      operationId: subscribeBookingEvents
       message:
         oneOf:
-          - $ref: '#/components/messages/OrderCreated'
-          - $ref: '#/components/messages/OrderCancelled'
-          - $ref: '#/components/messages/PaymentProcessed'
+          - $ref: '#/components/messages/BookingConfirmed'
+          - $ref: '#/components/messages/BookingCancelled'
+          - $ref: '#/components/messages/PaymentSuccess'
 
 components:
   messages:
-    OrderCreated:
-      name: OrderCreated
-      title: Order Created Event
-      summary: Published when a new order is created
+    BookingConfirmed:
+      name: BookingConfirmed
+      title: Booking Confirmed Event
+      summary: Published when a new booking is confirmed
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/OrderCreatedPayload'
+        $ref: '#/components/schemas/BookingConfirmedPayload'
 
-    OrderCancelled:
-      name: OrderCancelled
-      title: Order Cancelled Event
-      summary: Published when an order is cancelled
+    BookingCancelled:
+      name: BookingCancelled
+      title: Booking Cancelled Event
+      summary: Published when a booking is cancelled
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/OrderCancelledPayload'
+        $ref: '#/components/schemas/BookingCancelledPayload'
 
-    PaymentProcessed:
-      name: PaymentProcessed
-      title: Payment Processed Event
-      summary: Published when a payment is successfully processed
+    PaymentSuccess:
+      name: PaymentSuccess
+      title: Payment Success Event
+      summary: Published when payment is successfully processed
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/PaymentProcessedPayload'
+        $ref: '#/components/schemas/PaymentSuccessPayload'
 
   schemas:
-    OrderCreatedPayload:
+    BookingConfirmedPayload:
       type: object
       properties:
-        event_id:
+        event_reference:
           type: string
-          description: Unique event identifier
-          example: EVT-A1B2C3D4
-        event_type:
+          description: Unique event reference
+          example: EV-A1B2C3D4E5
+        event_category:
           type: string
-          enum: [order.created]
-          description: Type of event
-        payload:
+          enum: [booking.confirmed]
+          description: Event category
+        data:
           type: object
           properties:
-            order_id:
+            booking_ref:
               type: string
-              description: Unique order identifier
-              example: ORD-12345678
-            customer_id:
+              description: Booking reference
+              example: BK-1234567890
+            client_identifier:
               type: string
-              description: Customer identifier
-              example: CUST-001
-            items:
+              description: Client identifier
+              example: CLIENT-001
+            booking_items:
               type: array
               items:
                 type: object
                 properties:
-                  product_id:
+                  item_identifier:
                     type: string
-                  quantity:
+                  item_quantity:
                     type: integer
-                  price:
+                  unit_cost:
                     type: number
-            total_amount:
+            total_cost:
               type: number
-              description: Total order amount
-              example: 99.99
-            status:
+              description: Total booking cost
+              example: 250.50
+            notes:
               type: string
-              example: pending
-            created_at:
-              type: string
-              format: date-time
-        timestamp:
-          type: string
-          format: date-time
-          description: Event timestamp
-
-    OrderCancelledPayload:
-      type: object
-      properties:
-        event_id:
-          type: string
-          description: Unique event identifier
-        event_type:
-          type: string
-          enum: [order.cancelled]
-        payload:
-          type: object
-          properties:
-            order_id:
-              type: string
-              description: Order identifier
-            customer_id:
-              type: string
-              description: Customer identifier
-            cancelled_at:
+            timestamp_created:
               type: string
               format: date-time
-        timestamp:
+        dispatched_at:
+          type: string
+          format: date-time
+          description: When event was dispatched
+
+    BookingCancelledPayload:
+      type: object
+      properties:
+        event_reference:
+          type: string
+          description: Unique event reference
+        event_category:
+          type: string
+          enum: [booking.cancelled]
+        data:
+          type: object
+          properties:
+            booking_ref:
+              type: string
+              description: Booking reference
+            client_identifier:
+              type: string
+              description: Client identifier
+            cancellation_timestamp:
+              type: string
+              format: date-time
+        dispatched_at:
           type: string
           format: date-time
 
-    PaymentProcessedPayload:
+    PaymentSuccessPayload:
       type: object
       properties:
-        event_id:
+        event_reference:
           type: string
-          description: Unique event identifier
-        event_type:
+          description: Unique event reference
+        event_category:
           type: string
-          enum: [payment.processed]
-        payload:
+          enum: [payment.success]
+        data:
           type: object
           properties:
-            payment_id:
+            payment_ref:
               type: string
-            order_id:
+            booking_ref:
               type: string
             amount:
               type: number
             processed_at:
               type: string
               format: date-time
-        timestamp:
+        dispatched_at:
           type: string
           format: date-time

@@ -66,37 +66,37 @@ Expected response:
 Visit the interactive API documentation:
 - **Swagger UI**: http://localhost:8000/api/docs
 
-### Create Your First Order
+### Create Your First Booking
 
 Using curl:
 ```bash
-curl -X POST http://localhost:8000/api/orders \
+curl -X POST http://localhost:8000/api/bookings \
   -H "Content-Type: application/json" \
   -d '{
-    "customer_id": "CUST-001",
-    "items": [
+    "client_identifier": "CLIENT-001",
+    "booking_items": [
       {
-        "product_id": "PROD-001",
-        "quantity": 2,
-        "price": 49.99
+        "item_identifier": "ITEM-001",
+        "item_quantity": 2,
+        "unit_cost": 75.50
       }
     ],
-    "total_amount": 99.98
+    "notes": "Conference room booking"
   }'
 ```
 
 Or use the Swagger UI at http://localhost:8000/api/docs to try it interactively.
 
-### View the Created Order
+### View the Created Booking
 
-Get the order (replace ORDER_ID with the ID from the response):
+Get the booking (replace BOOKING_REF with the reference from the response):
 ```bash
-curl http://localhost:8000/api/orders/ORD-12345678
+curl http://localhost:8000/api/bookings/BK-1234567890
 ```
 
-List all orders:
+List all bookings:
 ```bash
-curl http://localhost:8000/api/orders
+curl http://localhost:8000/api/bookings
 ```
 
 ## Step 5: See Events in Kafka
@@ -139,27 +139,27 @@ You'll see traces showing:
 5. Open "Outbox Events Dashboard"
 
 The dashboard shows:
-- Orders created per second
-- Failed orders
+- Bookings created per second
+- Failed bookings
 - Events published by type
 - Request duration metrics
 
-## Step 8: Create More Orders and See the System in Action
+## Step 8: Create More Bookings and See the System in Action
 
-Run multiple order creation requests:
+Run multiple booking creation requests:
 
 ```bash
 for i in {1..10}; do
-  curl -X POST http://localhost:8000/api/orders \
+  curl -X POST http://localhost:8000/api/bookings \
     -H "Content-Type: application/json" \
     -d "{
-      \"customer_id\": \"CUST-$(printf %03d $i)\",
-      \"items\": [{
-        \"product_id\": \"PROD-001\",
-        \"quantity\": $i,
-        \"price\": 49.99
+      \"client_identifier\": \"CLIENT-$(printf %03d $i)\",
+      \"booking_items\": [{
+        \"item_identifier\": \"ITEM-001\",
+        \"item_quantity\": $i,
+        \"unit_cost\": 50.00
       }],
-      \"total_amount\": $((i * 50))
+      \"notes\": \"Test booking $i\"
     }"
   echo ""
 done
@@ -172,13 +172,13 @@ Now observe:
 
 ## Understanding the Outbox Pattern
 
-When you create an order, here's what happens:
+When you create a booking, here's what happens:
 
-1. **Order Creation**: Order is saved to MongoDB `orders` collection
-2. **Event Creation**: Event is saved to MongoDB `outbox` collection (same database, atomic)
-3. **Background Processing**: Outbox processor (running every 5 seconds) finds pending events
-4. **Event Publishing**: Events are published to Kafka topic `business-events`
-5. **Status Update**: Event status is updated to "published" in outbox collection
+1. **Booking Storage**: Booking is saved to MongoDB `bookings` collection
+2. **Event Storage**: Event is saved to MongoDB `event_outbox` collection (same database, atomic)
+3. **Background Worker**: Outbox worker (polling every 5 seconds) finds awaiting events
+4. **Event Dispatch**: Events are dispatched to Kafka topic `business-events`
+5. **Status Update**: Event status is updated to "dispatched" in outbox collection
 
 This ensures that events are never lost, even if Kafka is temporarily unavailable!
 
@@ -193,31 +193,31 @@ docker exec -it outbox-mongodb mongosh -u admin -p password123
 # Switch to database
 use outbox_db
 
-# View orders
-db.orders.find().pretty()
+# View bookings
+db.bookings.find().pretty()
 
 # View outbox events
-db.outbox.find().pretty()
+db.event_outbox.find().pretty()
 
-# Count pending events
-db.outbox.countDocuments({status: "pending"})
+# Count awaiting events
+db.event_outbox.countDocuments({current_state: "awaiting"})
 
-# Count published events
-db.outbox.countDocuments({status: "published"})
+# Count dispatched events
+db.event_outbox.countDocuments({current_state: "dispatched"})
 
 # Exit
 exit
 ```
 
-## Testing Order Cancellation
+## Testing Booking Cancellation
 
-Cancel an order to see a different event type:
+Cancel a booking to see a different event type:
 
 ```bash
-curl -X PUT http://localhost:8000/api/orders/ORD-12345678/cancel
+curl -X PUT http://localhost:8000/api/bookings/BK-1234567890/cancel
 ```
 
-Check Kafka UI to see the `order.cancelled` event!
+Check Kafka UI to see the `booking.cancelled` event!
 
 ## Viewing Prometheus Metrics Directly
 
@@ -226,14 +226,14 @@ Check Kafka UI to see the `order.cancelled` event!
 3. Try these queries:
 
 ```promql
-# Orders created rate
-rate(orders_created_total[1m])
+# Bookings created rate
+rate(booking_transactions_total[1m])
 
-# Total orders created
-orders_created_total
+# Total bookings created
+booking_transactions_total
 
-# Events by type
-events_published_total
+# Events by category
+domain_events_total
 ```
 
 ## Next Steps
@@ -315,13 +315,13 @@ docker-compose down -v
 
 ## Summary
 
-You now have a complete event-driven application running with:
+You now have a complete event-driven booking application running with:
 
-✅ REST API for business operations
-✅ Reliable event publishing with outbox pattern
+✅ REST API for booking operations
+✅ Reliable event publishing with transactional outbox pattern
 ✅ Event streaming via Kafka
-✅ Distributed tracing with Jaeger
-✅ Metrics visualization with Grafana
+✅ Distributed tracing with Jaeger and OpenTelemetry
+✅ Metrics visualization with Grafana and Prometheus
 ✅ Complete observability stack
 
 Explore, experiment, and learn! 🚀

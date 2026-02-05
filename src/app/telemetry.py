@@ -1,5 +1,5 @@
 """
-OpenTelemetry configuration and instrumentation
+OpenTelemetry instrumentation setup
 """
 import logging
 from opentelemetry import trace
@@ -9,44 +9,48 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.pymongo import PymongoInstrumentor
 from opentelemetry.sdk.resources import Resource
-from src.config.settings import settings
+from src.config.settings import get_configuration
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
-def setup_telemetry():
-    """Setup OpenTelemetry instrumentation"""
+def configure_observability():
+    """Configure OpenTelemetry tracing"""
     try:
-        # Create resource with service name
-        resource = Resource.create({"service.name": settings.otel_service_name})
+        config = get_configuration()
         
-        # Setup trace provider
-        trace_provider = TracerProvider(resource=resource)
-        
-        # Setup OTLP exporter
-        otlp_exporter = OTLPSpanExporter(
-            endpoint=f"{settings.otel_exporter_otlp_endpoint}/v1/traces"
+        # Define service resource
+        service_resource = Resource.create(
+            {"service.name": config.service_identifier}
         )
         
-        # Add span processor
-        trace_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+        # Initialize tracer provider
+        provider = TracerProvider(resource=service_resource)
         
-        # Set global trace provider
-        trace.set_tracer_provider(trace_provider)
+        # Configure OTLP exporter
+        span_exporter = OTLPSpanExporter(
+            endpoint=f"{config.otlp_endpoint}/v1/traces"
+        )
+        
+        # Attach span processor
+        provider.add_span_processor(BatchSpanProcessor(span_exporter))
+        
+        # Register provider
+        trace.set_tracer_provider(provider)
         
         # Instrument PyMongo
         PymongoInstrumentor().instrument()
         
-        logger.info("OpenTelemetry instrumentation configured")
+        log.info("OpenTelemetry configuration complete")
         
-    except Exception as e:
-        logger.error(f"Failed to setup telemetry: {e}")
+    except Exception as error:
+        log.error(f"Telemetry setup error: {error}")
 
 
-def instrument_fastapi(app):
-    """Instrument FastAPI application"""
+def apply_fastapi_instrumentation(application):
+    """Apply instrumentation to FastAPI app"""
     try:
-        FastAPIInstrumentor.instrument_app(app)
-        logger.info("FastAPI instrumented with OpenTelemetry")
-    except Exception as e:
-        logger.error(f"Failed to instrument FastAPI: {e}")
+        FastAPIInstrumentor.instrument_app(application)
+        log.info("FastAPI telemetry applied")
+    except Exception as error:
+        log.error(f"FastAPI instrumentation error: {error}")

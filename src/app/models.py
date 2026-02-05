@@ -1,73 +1,97 @@
 """
-Data models for the application
+Domain models for the booking system
 """
 from datetime import datetime
-from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field, validator
 from enum import Enum
+import uuid
 
 
-class EventType(str, Enum):
-    """Business event types"""
-    ORDER_CREATED = "order.created"
-    ORDER_UPDATED = "order.updated"
-    ORDER_CANCELLED = "order.cancelled"
-    PAYMENT_PROCESSED = "payment.processed"
-    PAYMENT_FAILED = "payment.failed"
-    SHIPMENT_CREATED = "shipment.created"
-
-
-class EventStatus(str, Enum):
-    """Outbox event status"""
+class BookingStatus(str, Enum):
+    """Status enumeration for bookings"""
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
+    COMPLETED = "completed"
     PENDING = "pending"
-    PUBLISHED = "published"
-    FAILED = "failed"
 
 
-class Order(BaseModel):
-    """Order domain model"""
-    order_id: str = Field(..., description="Unique order identifier")
-    customer_id: str = Field(..., description="Customer identifier")
-    items: list[Dict[str, Any]] = Field(..., description="Order items")
-    total_amount: float = Field(..., description="Total order amount")
-    status: str = Field(default="pending", description="Order status")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+class EventCategory(str, Enum):
+    """Categories of domain events"""
+    BOOKING_CONFIRMED = "booking.confirmed"
+    BOOKING_CANCELLED = "booking.cancelled"
+    BOOKING_COMPLETED = "booking.completed"
+    PAYMENT_SUCCESS = "payment.success"
+    PAYMENT_DECLINED = "payment.declined"
 
 
-class OrderCreateRequest(BaseModel):
-    """Request model for creating an order"""
-    customer_id: str = Field(..., description="Customer identifier")
-    items: list[Dict[str, Any]] = Field(..., description="Order items")
-    total_amount: float = Field(..., description="Total order amount", gt=0)
+class OutboxState(str, Enum):
+    """State of events in the outbox"""
+    AWAITING = "awaiting"
+    DISPATCHED = "dispatched"
+    ERROR = "error"
 
 
-class OrderResponse(BaseModel):
-    """Response model for order operations"""
-    order_id: str
-    customer_id: str
-    items: list[Dict[str, Any]]
-    total_amount: float
-    status: str
-    created_at: datetime
-    updated_at: datetime
+class BookingItem(BaseModel):
+    """Individual item in a booking"""
+    item_identifier: str = Field(..., description="Item ID")
+    item_quantity: int = Field(..., ge=1, description="Quantity")
+    unit_cost: float = Field(..., gt=0, description="Cost per unit")
+    
+    @validator('unit_cost')
+    def validate_cost(cls, value):
+        return round(value, 2)
 
 
-class OutboxEvent(BaseModel):
-    """Outbox event model for the transactional outbox pattern"""
-    event_id: str = Field(..., description="Unique event identifier")
-    event_type: EventType = Field(..., description="Type of business event")
-    aggregate_id: str = Field(..., description="ID of the aggregate (e.g., order_id)")
-    payload: Dict[str, Any] = Field(..., description="Event payload")
-    status: EventStatus = Field(default=EventStatus.PENDING)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    published_at: Optional[datetime] = None
-    retry_count: int = Field(default=0)
+class BookingRequest(BaseModel):
+    """Request payload for creating a booking"""
+    client_identifier: str = Field(..., min_length=3, description="Client ID")
+    booking_items: List[BookingItem] = Field(..., min_items=1, description="Items to book")
+    notes: Optional[str] = Field(None, max_length=500, description="Additional notes")
+    
+    @property
+    def calculated_total(self) -> float:
+        """Calculate total amount"""
+        return round(sum(item.item_quantity * item.unit_cost for item in self.booking_items), 2)
 
 
-class HealthResponse(BaseModel):
-    """Health check response"""
-    status: str
-    mongodb: str
-    kafka: str
-    timestamp: datetime
+class BookingRecord(BaseModel):
+    """Complete booking record"""
+    booking_ref: str = Field(..., description="Booking reference")
+    client_identifier: str
+    booking_items: List[BookingItem]
+    total_cost: float
+    booking_status: BookingStatus
+    notes: Optional[str] = None
+    timestamp_created: datetime = Field(default_factory=datetime.utcnow)
+    timestamp_modified: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class EventRecord(BaseModel):
+    """Event stored in outbox table"""
+    event_ref: str = Field(..., description="Event reference ID")
+    category: EventCategory
+    entity_id: str = Field(..., description="Related entity ID")
+    event_data: Dict[str, Any]
+    current_state: OutboxState = OutboxState.AWAITING
+    timestamp_created: datetime = Field(default_factory=datetime.utcnow)
+    timestamp_dispatched: Optional[datetime] = None
+    attempt_count: int = 0
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class SystemHealth(BaseModel):
+    """Health status response"""
+    overall: str
+    database_status: str
+    broker_status: str
+    checked_at: datetime = Field(default_factory=datetime.utcnow)

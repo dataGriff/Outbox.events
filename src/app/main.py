@@ -1,5 +1,5 @@
 """
-Main FastAPI application with Outbox Pattern implementation
+Main FastAPI application implementing outbox pattern
 """
 import logging
 import uuid
@@ -8,285 +8,269 @@ from contextlib import asynccontextmanager
 from typing import List
 
 from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
-from src.config.settings import settings
-from src.app.database import db_service
-from src.app.kafka_service import kafka_service
-from src.app.outbox_processor import outbox_processor
-from src.app.telemetry import setup_telemetry, instrument_fastapi
+from src.config.settings import get_configuration
+from src.app.database import repository_instance
+from src.app.kafka_service import broker_instance
+from src.app.outbox_processor import worker_instance
+from src.app.telemetry import configure_observability, apply_fastapi_instrumentation
 from src.app.models import (
-    Order, OrderCreateRequest, OrderResponse, OutboxEvent,
-    EventType, HealthResponse
+    BookingRequest, BookingRecord, BookingStatus,
+    EventRecord, EventCategory, SystemHealth
 )
 
-# Configure logging
+# Logging setup
+config = get_configuration()
 logging.basicConfig(
-    level=getattr(logging, settings.log_level),
+    level=getattr(logging, config.logging_level),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 # Prometheus metrics
-order_created_counter = Counter('orders_created_total', 'Total number of orders created')
-order_failed_counter = Counter('orders_failed_total', 'Total number of failed orders')
-events_published_counter = Counter('events_published_total', 'Total number of events published', ['event_type'])
-request_duration = Histogram('request_duration_seconds', 'Request duration', ['method', 'endpoint'])
+bookings_counter = Counter('booking_transactions_total', 'Total bookings created')
+booking_errors_counter = Counter('booking_errors_total', 'Total booking failures')
+events_counter = Counter('domain_events_total', 'Domain events dispatched', ['category'])
+latency_histogram = Histogram('api_latency_seconds', 'API request latency', ['operation', 'path'])
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
-    # Startup
-    logger.info("Starting Outbox Events application...")
+async def application_lifecycle(app: FastAPI):
+    """Manage application lifecycle"""
+    # Startup sequence
+    log.info("Initializing application...")
     
-    # Setup telemetry
-    setup_telemetry()
+    configure_observability()
+    await repository_instance.establish_connection()
+    broker_instance.initialize()
+    await worker_instance.begin()
     
-    # Connect to MongoDB
-    await db_service.connect()
-    
-    # Connect to Kafka
-    kafka_service.connect()
-    
-    # Start outbox processor
-    await outbox_processor.start()
-    
-    logger.info("Application started successfully")
+    log.info("Application ready")
     
     yield
     
-    # Shutdown
-    logger.info("Shutting down application...")
+    # Shutdown sequence
+    log.info("Shutting down application...")
     
-    # Stop outbox processor
-    await outbox_processor.stop()
+    await worker_instance.halt()
+    await repository_instance.close_connection()
+    broker_instance.shutdown()
     
-    # Disconnect from services
-    await db_service.disconnect()
-    kafka_service.disconnect()
-    
-    logger.info("Application shut down successfully")
+    log.info("Application stopped")
 
 
-# Create FastAPI app
-app = FastAPI(
-    title="Outbox Events API",
-    description="Event-based application using MongoDB and Kafka with Outbox Pattern",
+# Initialize FastAPI
+application = FastAPI(
+    title="Event-Driven Booking API",
+    description="Booking system with transactional outbox pattern for reliable event delivery",
     version="1.0.0",
-    lifespan=lifespan,
+    lifespan=application_lifecycle,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json"
 )
 
-# Instrument FastAPI with OpenTelemetry
-instrument_fastapi(app)
+# Apply telemetry
+apply_fastapi_instrumentation(application)
 
 
-@app.get("/", tags=["Root"])
-async def root():
-    """Root endpoint"""
+@application.get("/", tags=["Info"])
+async def root_endpoint():
+    """Root endpoint information"""
     return {
-        "message": "Welcome to Outbox Events API",
-        "docs": "/api/docs",
-        "health": "/health"
+        "service": "Event-Driven Booking API",
+        "documentation": "/api/docs",
+        "health": "/health",
+        "metrics": "/metrics"
     }
 
 
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def health_check():
-    """Health check endpoint"""
-    mongodb_healthy = await db_service.health_check()
-    kafka_healthy = kafka_service.health_check()
+@application.get("/health", response_model=SystemHealth, tags=["Monitoring"])
+async def health_endpoint():
+    """System health check"""
+    db_healthy = await repository_instance.verify_health()
+    kafka_healthy = broker_instance.verify_connectivity()
     
-    overall_status = "healthy" if (mongodb_healthy and kafka_healthy) else "unhealthy"
+    overall_status = "healthy" if (db_healthy and kafka_healthy) else "degraded"
     
-    return HealthResponse(
-        status=overall_status,
-        mongodb="healthy" if mongodb_healthy else "unhealthy",
-        kafka="healthy" if kafka_healthy else "unhealthy",
-        timestamp=datetime.utcnow()
+    return SystemHealth(
+        overall=overall_status,
+        database_status="operational" if db_healthy else "unavailable",
+        broker_status="operational" if kafka_healthy else "unavailable",
+        checked_at=datetime.utcnow()
     )
 
 
-@app.get("/metrics", tags=["Metrics"])
-async def metrics():
-    """Prometheus metrics endpoint"""
+@application.get("/metrics", tags=["Monitoring"])
+async def metrics_endpoint():
+    """Prometheus metrics"""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@app.post("/api/orders", response_model=OrderResponse, status_code=status.HTTP_201_CREATED, tags=["Orders"])
-async def create_order(order_request: OrderCreateRequest):
+@application.post(
+    "/api/bookings",
+    response_model=BookingRecord,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Bookings"]
+)
+async def create_booking_endpoint(request: BookingRequest):
     """
-    Create a new order.
+    Create a new booking
     
-    This endpoint demonstrates the transactional outbox pattern:
-    1. Creates an order in MongoDB
-    2. Saves an event to the outbox table in the same database
-    3. Background processor publishes events to Kafka asynchronously
+    Implements transactional outbox pattern:
+    - Stores booking in database
+    - Stores event in outbox table (same database)
+    - Background worker publishes events to Kafka
     """
     try:
-        # Generate unique order ID
-        order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+        # Generate booking reference
+        booking_ref = f"BK-{uuid.uuid4().hex[:10].upper()}"
         
-        # Create order
-        order = Order(
-            order_id=order_id,
-            customer_id=order_request.customer_id,
-            items=order_request.items,
-            total_amount=order_request.total_amount,
-            status="pending"
+        # Create booking record
+        booking = BookingRecord(
+            booking_ref=booking_ref,
+            client_identifier=request.client_identifier,
+            booking_items=request.booking_items,
+            total_cost=request.calculated_total,
+            booking_status=BookingStatus.CONFIRMED,
+            notes=request.notes
         )
         
-        # Save order to database
-        await db_service.create_order(order)
+        # Persist booking
+        await repository_instance.persist_booking(booking)
         
         # Create outbox event
-        event = OutboxEvent(
-            event_id=f"EVT-{uuid.uuid4().hex[:8].upper()}",
-            event_type=EventType.ORDER_CREATED,
-            aggregate_id=order_id,
-            payload={
-                "order_id": order_id,
-                "customer_id": order.customer_id,
-                "items": order.items,
-                "total_amount": order.total_amount,
-                "status": order.status,
-                "created_at": order.created_at.isoformat()
+        event = EventRecord(
+            event_ref=f"EV-{uuid.uuid4().hex[:10].upper()}",
+            category=EventCategory.BOOKING_CONFIRMED,
+            entity_id=booking_ref,
+            event_data={
+                "booking_ref": booking_ref,
+                "client_identifier": booking.client_identifier,
+                "booking_items": [item.model_dump() for item in booking.booking_items],
+                "total_cost": booking.total_cost,
+                "notes": booking.notes,
+                "timestamp_created": booking.timestamp_created.isoformat()
             }
         )
         
-        # Save event to outbox (same database, ensuring atomicity)
-        await db_service.save_outbox_event(event)
+        # Store event in outbox
+        await repository_instance.store_event(event)
         
-        # Update metrics
-        order_created_counter.inc()
+        bookings_counter.inc()
         
-        logger.info(f"Order {order_id} created successfully with event {event.event_id}")
+        log.info(f"Booking {booking_ref} created with event {event.event_ref}")
         
-        return OrderResponse(
-            order_id=order.order_id,
-            customer_id=order.customer_id,
-            items=order.items,
-            total_amount=order.total_amount,
-            status=order.status,
-            created_at=order.created_at,
-            updated_at=order.updated_at
-        )
+        return booking
     
-    except Exception as e:
-        logger.error(f"Failed to create order: {e}")
-        order_failed_counter.inc()
+    except ValueError as error:
+        log.error(f"Validation error: {error}")
+        booking_errors_counter.inc()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error)
+        )
+    except Exception as error:
+        log.error(f"Booking creation error: {error}")
+        booking_errors_counter.inc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create order: {str(e)}"
+            detail="Failed to create booking"
         )
 
 
-@app.get("/api/orders/{order_id}", response_model=OrderResponse, tags=["Orders"])
-async def get_order(order_id: str):
-    """Get an order by ID"""
-    order = await db_service.get_order(order_id)
+@application.get(
+    "/api/bookings/{booking_ref}",
+    response_model=BookingRecord,
+    tags=["Bookings"]
+)
+async def get_booking_endpoint(booking_ref: str):
+    """Retrieve a booking by reference"""
+    booking = await repository_instance.fetch_booking(booking_ref)
     
-    if not order:
+    if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order {order_id} not found"
+            detail=f"Booking {booking_ref} not found"
         )
     
-    return OrderResponse(
-        order_id=order.order_id,
-        customer_id=order.customer_id,
-        items=order.items,
-        total_amount=order.total_amount,
-        status=order.status,
-        created_at=order.created_at,
-        updated_at=order.updated_at
-    )
+    return booking
 
 
-@app.get("/api/orders", response_model=List[OrderResponse], tags=["Orders"])
-async def list_orders(limit: int = 100):
-    """List all orders"""
-    orders = await db_service.list_orders(limit=limit)
+@application.get(
+    "/api/bookings",
+    response_model=List[BookingRecord],
+    tags=["Bookings"]
+)
+async def list_bookings_endpoint(limit: int = 100):
+    """List all bookings"""
+    if limit > 500:
+        limit = 500
     
-    return [
-        OrderResponse(
-            order_id=order.order_id,
-            customer_id=order.customer_id,
-            items=order.items,
-            total_amount=order.total_amount,
-            status=order.status,
-            created_at=order.created_at,
-            updated_at=order.updated_at
-        )
-        for order in orders
-    ]
+    bookings = await repository_instance.fetch_all_bookings(max_results=limit)
+    return bookings
 
 
-@app.put("/api/orders/{order_id}/cancel", response_model=OrderResponse, tags=["Orders"])
-async def cancel_order(order_id: str):
+@application.put(
+    "/api/bookings/{booking_ref}/cancel",
+    response_model=BookingRecord,
+    tags=["Bookings"]
+)
+async def cancel_booking_endpoint(booking_ref: str):
     """
-    Cancel an order.
+    Cancel a booking
     
-    This demonstrates publishing a different event type through the outbox pattern.
+    Demonstrates publishing different event types via outbox pattern
     """
     try:
-        # Get existing order
-        order = await db_service.get_order(order_id)
+        # Fetch existing booking
+        booking = await repository_instance.fetch_booking(booking_ref)
         
-        if not order:
+        if not booking:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Order {order_id} not found"
+                detail=f"Booking {booking_ref} not found"
             )
         
-        # Update order status
-        await db_service.update_order_status(order_id, "cancelled")
+        # Update status
+        await repository_instance.modify_booking_status(
+            booking_ref,
+            BookingStatus.CANCELLED.value
+        )
         
-        # Create outbox event for cancellation
-        event = OutboxEvent(
-            event_id=f"EVT-{uuid.uuid4().hex[:8].upper()}",
-            event_type=EventType.ORDER_CANCELLED,
-            aggregate_id=order_id,
-            payload={
-                "order_id": order_id,
-                "customer_id": order.customer_id,
-                "cancelled_at": datetime.utcnow().isoformat()
+        # Create cancellation event
+        event = EventRecord(
+            event_ref=f"EV-{uuid.uuid4().hex[:10].upper()}",
+            category=EventCategory.BOOKING_CANCELLED,
+            entity_id=booking_ref,
+            event_data={
+                "booking_ref": booking_ref,
+                "client_identifier": booking.client_identifier,
+                "cancellation_timestamp": datetime.utcnow().isoformat()
             }
         )
         
-        # Save event to outbox
-        await db_service.save_outbox_event(event)
+        # Store in outbox
+        await repository_instance.store_event(event)
         
-        logger.info(f"Order {order_id} cancelled with event {event.event_id}")
+        log.info(f"Booking {booking_ref} cancelled with event {event.event_ref}")
         
-        # Get updated order
-        updated_order = await db_service.get_order(order_id)
-        
-        return OrderResponse(
-            order_id=updated_order.order_id,
-            customer_id=updated_order.customer_id,
-            items=updated_order.items,
-            total_amount=updated_order.total_amount,
-            status=updated_order.status,
-            created_at=updated_order.created_at,
-            updated_at=updated_order.updated_at
-        )
+        # Fetch updated booking
+        updated_booking = await repository_instance.fetch_booking(booking_ref)
+        return updated_booking
     
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to cancel order: {e}")
+    except Exception as error:
+        log.error(f"Cancellation error: {error}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to cancel order: {str(e)}"
+            detail="Failed to cancel booking"
         )
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(application, host="0.0.0.0", port=8000)

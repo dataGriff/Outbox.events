@@ -1,30 +1,35 @@
 """
-Configuration settings for the Outbox Events application.
+Application configuration using Pydantic settings
 """
-import os
 from pydantic_settings import BaseSettings
+from functools import lru_cache
 
 
-class Settings(BaseSettings):
-    """Application settings"""
+class AppConfiguration(BaseSettings):
+    """Central configuration for the application"""
     
-    # MongoDB settings
-    mongodb_uri: str = os.getenv("MONGODB_URI", "mongodb://admin:password123@localhost:27017/")
-    mongodb_database: str = os.getenv("MONGODB_DATABASE", "outbox_db")
+    # Database configuration
+    mongo_connection_string: str = "mongodb://admin:password123@localhost:27017/"
+    mongo_db_name: str = "outbox_db"
     
-    # Kafka settings
-    kafka_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-    kafka_topic: str = os.getenv("KAFKA_TOPIC", "business-events")
+    # Message broker configuration
+    kafka_brokers: str = "localhost:9092"
+    event_topic_name: str = "business-events"
     
-    # OpenTelemetry settings
-    otel_exporter_otlp_endpoint: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
-    otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "outbox-event-service")
+    # Observability configuration
+    otlp_endpoint: str = "http://localhost:4318"
+    service_identifier: str = "outbox-event-service"
     
     # Application settings
-    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    logging_level: str = "INFO"
+    outbox_poll_seconds: int = 5
     
     class Config:
         env_file = ".env"
+        case_sensitive = False
 
 
-settings = Settings()
+@lru_cache()
+def get_configuration() -> AppConfiguration:
+    """Get cached configuration instance"""
+    return AppConfiguration()

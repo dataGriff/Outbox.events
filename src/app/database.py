@@ -1,143 +1,170 @@
 """
-Database service for MongoDB operations
+MongoDB persistence layer
 """
 import logging
-from typing import Optional, List
+from typing import List, Optional
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pymongo.errors import ConnectionFailure
-from src.config.settings import settings
-from src.app.models import Order, OutboxEvent, EventStatus
+from pymongo.errors import ConnectionFailure, DuplicateKeyError
+from src.config.settings import get_configuration
+from src.app.models import BookingRecord, EventRecord, OutboxState
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
-class DatabaseService:
-    """MongoDB database service"""
+class MongoRepository:
+    """Repository pattern for MongoDB operations"""
     
     def __init__(self):
-        self.client: Optional[AsyncIOMotorClient] = None
-        self.db: Optional[AsyncIOMotorDatabase] = None
+        self._client: Optional[AsyncIOMotorClient] = None
+        self._database: Optional[AsyncIOMotorDatabase] = None
+        self._config = get_configuration()
     
-    async def connect(self):
-        """Connect to MongoDB"""
+    async def establish_connection(self):
+        """Establish connection to MongoDB"""
         try:
-            self.client = AsyncIOMotorClient(settings.mongodb_uri)
-            self.db = self.client[settings.mongodb_database]
-            # Test connection
-            await self.client.admin.command('ping')
-            logger.info("Successfully connected to MongoDB")
+            self._client = AsyncIOMotorClient(
+                self._config.mongo_connection_string,
+                serverSelectionTimeoutMS=5000
+            )
+            self._database = self._client[self._config.mongo_db_name]
             
-            # Create indexes
-            await self._create_indexes()
-        except ConnectionFailure as e:
-            logger.error(f"Failed to connect to MongoDB: {e}")
+            # Verify connection
+            await self._client.admin.command('ping')
+            log.info("MongoDB connection established successfully")
+            
+            # Setup indexes
+            await self._setup_indexes()
+            
+        except ConnectionFailure as error:
+            log.error(f"MongoDB connection failed: {error}")
             raise
     
-    async def disconnect(self):
-        """Disconnect from MongoDB"""
-        if self.client:
-            self.client.close()
-            logger.info("Disconnected from MongoDB")
+    async def close_connection(self):
+        """Close MongoDB connection"""
+        if self._client:
+            self._client.close()
+            log.info("MongoDB connection closed")
     
-    async def _create_indexes(self):
-        """Create necessary indexes"""
-        # Orders collection indexes
-        await self.db.orders.create_index("order_id", unique=True)
-        await self.db.orders.create_index("customer_id")
+    async def _setup_indexes(self):
+        """Create required indexes"""
+        bookings_collection = self._database.bookings
+        outbox_collection = self._database.event_outbox
         
-        # Outbox collection indexes
-        await self.db.outbox.create_index("event_id", unique=True)
-        await self.db.outbox.create_index([("status", 1), ("created_at", 1)])
+        # Bookings indexes
+        await bookings_collection.create_index("booking_ref", unique=True)
+        await bookings_collection.create_index("client_identifier")
+        await bookings_collection.create_index([("timestamp_created", -1)])
         
-        logger.info("Database indexes created")
+        # Outbox indexes
+        await outbox_collection.create_index("event_ref", unique=True)
+        await outbox_collection.create_index([("current_state", 1), ("timestamp_created", 1)])
+        await outbox_collection.create_index("entity_id")
+        
+        log.info("Database indexes configured")
     
-    async def health_check(self) -> bool:
-        """Check if database is healthy"""
+    async def verify_health(self) -> bool:
+        """Check database health"""
         try:
-            await self.client.admin.command('ping')
+            await self._client.admin.command('ping')
             return True
-        except Exception as e:
-            logger.error(f"Database health check failed: {e}")
+        except Exception as error:
+            log.error(f"Health check failed: {error}")
             return False
     
-    # Order operations
-    async def create_order(self, order: Order) -> str:
-        """Create a new order"""
-        order_dict = order.model_dump()
-        result = await self.db.orders.insert_one(order_dict)
-        logger.info(f"Created order: {order.order_id}")
-        return order.order_id
+    # Booking operations
+    async def persist_booking(self, booking: BookingRecord) -> str:
+        """Store a booking record"""
+        try:
+            booking_dict = booking.model_dump()
+            await self._database.bookings.insert_one(booking_dict)
+            log.info(f"Persisted booking: {booking.booking_ref}")
+            return booking.booking_ref
+        except DuplicateKeyError:
+            log.warning(f"Booking {booking.booking_ref} already exists")
+            raise ValueError(f"Booking {booking.booking_ref} already exists")
     
-    async def get_order(self, order_id: str) -> Optional[Order]:
-        """Get an order by ID"""
-        order_dict = await self.db.orders.find_one({"order_id": order_id})
-        if order_dict:
-            order_dict.pop('_id', None)
-            return Order(**order_dict)
+    async def fetch_booking(self, booking_ref: str) -> Optional[BookingRecord]:
+        """Retrieve a booking by reference"""
+        doc = await self._database.bookings.find_one({"booking_ref": booking_ref})
+        if doc:
+            doc.pop('_id', None)
+            return BookingRecord(**doc)
         return None
     
-    async def list_orders(self, limit: int = 100) -> List[Order]:
-        """List all orders"""
-        cursor = self.db.orders.find().limit(limit).sort("created_at", -1)
-        orders = []
-        async for order_dict in cursor:
-            order_dict.pop('_id', None)
-            orders.append(Order(**order_dict))
-        return orders
+    async def fetch_all_bookings(self, max_results: int = 100) -> List[BookingRecord]:
+        """Retrieve all bookings"""
+        cursor = self._database.bookings.find().limit(max_results).sort("timestamp_created", -1)
+        bookings = []
+        async for doc in cursor:
+            doc.pop('_id', None)
+            bookings.append(BookingRecord(**doc))
+        return bookings
     
-    async def update_order_status(self, order_id: str, status: str) -> bool:
-        """Update order status"""
-        result = await self.db.orders.update_one(
-            {"order_id": order_id},
-            {"$set": {"status": status, "updated_at": datetime.utcnow()}}
-        )
-        return result.modified_count > 0
-    
-    # Outbox operations
-    async def save_outbox_event(self, event: OutboxEvent) -> str:
-        """Save an event to the outbox"""
-        event_dict = event.model_dump()
-        await self.db.outbox.insert_one(event_dict)
-        logger.info(f"Saved outbox event: {event.event_id}")
-        return event.event_id
-    
-    async def get_pending_events(self, limit: int = 100) -> List[OutboxEvent]:
-        """Get pending events from outbox"""
-        cursor = self.db.outbox.find(
-            {"status": EventStatus.PENDING.value}
-        ).limit(limit).sort("created_at", 1)
-        
-        events = []
-        async for event_dict in cursor:
-            event_dict.pop('_id', None)
-            events.append(OutboxEvent(**event_dict))
-        return events
-    
-    async def mark_event_published(self, event_id: str) -> bool:
-        """Mark an event as published"""
-        result = await self.db.outbox.update_one(
-            {"event_id": event_id},
+    async def modify_booking_status(self, booking_ref: str, new_status: str) -> bool:
+        """Update booking status"""
+        result = await self._database.bookings.update_one(
+            {"booking_ref": booking_ref},
             {
                 "$set": {
-                    "status": EventStatus.PUBLISHED.value,
-                    "published_at": datetime.utcnow()
+                    "booking_status": new_status,
+                    "timestamp_modified": datetime.utcnow()
                 }
             }
         )
         return result.modified_count > 0
     
-    async def mark_event_failed(self, event_id: str) -> bool:
-        """Mark an event as failed"""
-        result = await self.db.outbox.update_one(
-            {"event_id": event_id},
+    # Outbox operations
+    async def store_event(self, event: EventRecord) -> str:
+        """Store event in outbox"""
+        try:
+            event_dict = event.model_dump()
+            await self._database.event_outbox.insert_one(event_dict)
+            log.info(f"Event stored in outbox: {event.event_ref}")
+            return event.event_ref
+        except DuplicateKeyError:
+            log.warning(f"Event {event.event_ref} already exists")
+            raise ValueError(f"Event {event.event_ref} already exists")
+    
+    async def retrieve_pending_events(self, batch_size: int = 50) -> List[EventRecord]:
+        """Get events awaiting dispatch"""
+        cursor = self._database.event_outbox.find(
+            {"current_state": OutboxState.AWAITING.value}
+        ).limit(batch_size).sort("timestamp_created", 1)
+        
+        events = []
+        async for doc in cursor:
+            doc.pop('_id', None)
+            events.append(EventRecord(**doc))
+        return events
+    
+    async def mark_as_dispatched(self, event_ref: str) -> bool:
+        """Mark event as successfully dispatched"""
+        result = await self._database.event_outbox.update_one(
+            {"event_ref": event_ref},
             {
-                "$set": {"status": EventStatus.FAILED.value},
-                "$inc": {"retry_count": 1}
+                "$set": {
+                    "current_state": OutboxState.DISPATCHED.value,
+                    "timestamp_dispatched": datetime.utcnow()
+                }
+            }
+        )
+        success = result.modified_count > 0
+        if success:
+            log.info(f"Event {event_ref} marked as dispatched")
+        return success
+    
+    async def mark_as_error(self, event_ref: str) -> bool:
+        """Mark event as failed"""
+        result = await self._database.event_outbox.update_one(
+            {"event_ref": event_ref},
+            {
+                "$set": {"current_state": OutboxState.ERROR.value},
+                "$inc": {"attempt_count": 1}
             }
         )
         return result.modified_count > 0
 
 
-# Global database service instance
-db_service = DatabaseService()
+# Singleton instance
+repository_instance = MongoRepository()

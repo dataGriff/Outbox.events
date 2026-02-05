@@ -87,40 +87,40 @@ That's it! All services are now running.
 
 ## 🎮 Usage Examples
 
-### Create an Order (REST API)
+### Create a Booking (REST API)
 
 ```bash
-curl -X POST http://localhost:8000/api/orders \
+curl -X POST http://localhost:8000/api/bookings \
   -H "Content-Type: application/json" \
   -d '{
-    "customer_id": "CUST-001",
-    "items": [
+    "client_identifier": "CLIENT-001",
+    "booking_items": [
       {
-        "product_id": "PROD-001",
-        "quantity": 2,
-        "price": 49.99
+        "item_identifier": "ITEM-001",
+        "item_quantity": 2,
+        "unit_cost": 75.50
       }
     ],
-    "total_amount": 99.98
+    "notes": "Conference room booking"
   }'
 ```
 
-### Get Order by ID
+### Get Booking by Reference
 
 ```bash
-curl http://localhost:8000/api/orders/ORD-12345678
+curl http://localhost:8000/api/bookings/BK-1234567890
 ```
 
-### List All Orders
+### List All Bookings
 
 ```bash
-curl http://localhost:8000/api/orders
+curl http://localhost:8000/api/bookings
 ```
 
-### Cancel an Order
+### Cancel a Booking
 
 ```bash
-curl -X PUT http://localhost:8000/api/orders/ORD-12345678/cancel
+curl -X PUT http://localhost:8000/api/bookings/BK-1234567890/cancel
 ```
 
 ### View Events in Kafka
@@ -172,18 +172,18 @@ Writing to a database and publishing to a message broker are two separate operat
 
 1. **Single Transaction**: Write business data and event to the same database
    ```python
-   # In MongoDB transaction
-   await db.orders.insert_one(order)
-   await db.outbox.insert_one(event)
+   # Store booking and event atomically
+   await repository.persist_booking(booking)
+   await repository.store_event(event)
    ```
 
-2. **Background Processor**: Polls outbox table and publishes events
+2. **Background Worker**: Polls outbox table and publishes events
    ```python
-   # Separate process
-   events = await db.outbox.find({"status": "pending"})
-   for event in events:
-       kafka.publish(event)
-       await db.outbox.update(event.id, {"status": "published"})
+   # Separate background process
+   pending = await repository.retrieve_pending_events()
+   for event in pending:
+       broker.dispatch_message(event)
+       await repository.mark_as_dispatched(event.event_ref)
    ```
 
 3. **Benefits**:
