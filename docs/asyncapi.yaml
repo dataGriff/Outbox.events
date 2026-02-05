@@ -1,0 +1,159 @@
+asyncapi: 2.6.0
+info:
+  title: Outbox Events - Business Events API
+  version: 1.0.0
+  description: |
+    AsyncAPI specification for business events published to Kafka using the outbox pattern.
+    
+    ## Event Flow
+    1. Business operations (orders, payments, etc.) are performed via REST API
+    2. Events are stored in MongoDB outbox table atomically with business data
+    3. Background processor publishes events to Kafka
+    4. Consumers can subscribe to event topics for event-driven processing
+  
+  contact:
+    name: API Support
+    email: support@example.com
+
+servers:
+  development:
+    url: localhost:9092
+    protocol: kafka
+    description: Development Kafka broker
+
+channels:
+  business-events:
+    description: Channel for all business events
+    subscribe:
+      summary: Subscribe to business events
+      operationId: subscribeBusinessEvents
+      message:
+        oneOf:
+          - $ref: '#/components/messages/OrderCreated'
+          - $ref: '#/components/messages/OrderCancelled'
+          - $ref: '#/components/messages/PaymentProcessed'
+
+components:
+  messages:
+    OrderCreated:
+      name: OrderCreated
+      title: Order Created Event
+      summary: Published when a new order is created
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/OrderCreatedPayload'
+
+    OrderCancelled:
+      name: OrderCancelled
+      title: Order Cancelled Event
+      summary: Published when an order is cancelled
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/OrderCancelledPayload'
+
+    PaymentProcessed:
+      name: PaymentProcessed
+      title: Payment Processed Event
+      summary: Published when a payment is successfully processed
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PaymentProcessedPayload'
+
+  schemas:
+    OrderCreatedPayload:
+      type: object
+      properties:
+        event_id:
+          type: string
+          description: Unique event identifier
+          example: EVT-A1B2C3D4
+        event_type:
+          type: string
+          enum: [order.created]
+          description: Type of event
+        payload:
+          type: object
+          properties:
+            order_id:
+              type: string
+              description: Unique order identifier
+              example: ORD-12345678
+            customer_id:
+              type: string
+              description: Customer identifier
+              example: CUST-001
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  product_id:
+                    type: string
+                  quantity:
+                    type: integer
+                  price:
+                    type: number
+            total_amount:
+              type: number
+              description: Total order amount
+              example: 99.99
+            status:
+              type: string
+              example: pending
+            created_at:
+              type: string
+              format: date-time
+        timestamp:
+          type: string
+          format: date-time
+          description: Event timestamp
+
+    OrderCancelledPayload:
+      type: object
+      properties:
+        event_id:
+          type: string
+          description: Unique event identifier
+        event_type:
+          type: string
+          enum: [order.cancelled]
+        payload:
+          type: object
+          properties:
+            order_id:
+              type: string
+              description: Order identifier
+            customer_id:
+              type: string
+              description: Customer identifier
+            cancelled_at:
+              type: string
+              format: date-time
+        timestamp:
+          type: string
+          format: date-time
+
+    PaymentProcessedPayload:
+      type: object
+      properties:
+        event_id:
+          type: string
+          description: Unique event identifier
+        event_type:
+          type: string
+          enum: [payment.processed]
+        payload:
+          type: object
+          properties:
+            payment_id:
+              type: string
+            order_id:
+              type: string
+            amount:
+              type: number
+            processed_at:
+              type: string
+              format: date-time
+        timestamp:
+          type: string
+          format: date-time

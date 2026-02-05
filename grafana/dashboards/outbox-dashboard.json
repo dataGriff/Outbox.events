@@ -1,0 +1,77 @@
+{
+  "dashboard": {
+    "title": "Outbox Events Dashboard",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Orders Created",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(orders_created_total[5m])",
+            "legendFormat": "Orders/sec"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Failed Orders",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(orders_failed_total[5m])",
+            "legendFormat": "Failures/sec"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Events Published by Type",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(events_published_total[5m])",
+            "legendFormat": "{{event_type}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Request Duration (95th percentile)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{method}} {{endpoint}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 16
+        }
+      }
+    ],
+    "schemaVersion": 16,
+    "version": 1
+  }
+}
